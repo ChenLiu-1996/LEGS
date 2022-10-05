@@ -6,8 +6,9 @@ from util import from_networkx_custom
 
 
 class ZINCDataset(Dataset):
-
-    """ZINC Tranch data"""
+    """
+    ZINC Tranch data
+    """
 
     def __init__(self, file_name, transform=None, prop_stat_dict=None, include_ki=False):
 
