@@ -4,7 +4,7 @@ import torch
 class LazyLayer(torch.nn.Module):
     """
     Currently a single elementwise multiplication with one laziness parameter per
-    channel. this is run through a softmax so that this is a real laziness parameter
+    channel. This is run through a softmax so that this is a real laziness parameter.
     """
 
     def __init__(self, n):

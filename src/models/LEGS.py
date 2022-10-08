@@ -6,9 +6,17 @@ from torch.nn import Linear
 # Reference: Data-Driven Learning of Geometric Scattering Networks, IEEE Machine Learning for Signal Processing Workshop 2021
 
 
-class TSNet(torch.nn.Module):
+class LEGSNet(torch.nn.Module):
+    """
+    Learnable Geometric Scattering Network.
+    `in_channels`:        number of input channels.
+    `out_channels`:       number of output channels.
+    `edge_in_channels`:   ???
+    `trainable_laziness`: whether the "laziness" of the LazyLayer (inside `Scatter`) is trainable.
+    """
 
-    def __init__(self, in_channels, out_channels, edge_in_channels=None, trainable_laziness=False, **kwargs):
+    def __init__(self, in_channels: int, out_channels: int,
+                 edge_in_channels=None, trainable_laziness: bool = False) -> None:
 
         super().__init__()
         self.in_channels = in_channels

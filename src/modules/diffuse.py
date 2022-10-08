@@ -8,11 +8,12 @@ from .lazy import LazyLayer
 
 
 class Diffuse(MessagePassing):
-
-    """ Implements low pass walk with optional weights
+    """
+    Low pass walk with optional weights.
     """
 
-    def __init__(self, in_channels, out_channels, trainable_laziness=False, fixed_weights=True):
+    def __init__(self, in_channels: int, out_channels: int,
+                 trainable_laziness: bool = False, fixed_weights: bool = True) -> None:
 
         super().__init__(aggr="add", node_dim=-3)  # "Add" aggregation.
         assert in_channels == out_channels

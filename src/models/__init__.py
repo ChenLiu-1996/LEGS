@@ -1,1 +1,1 @@
-from .LEGS import TSNet
+from .LEGS import LEGSNet

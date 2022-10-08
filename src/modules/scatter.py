@@ -4,23 +4,40 @@ from .diffuse import Diffuse
 
 
 class Scatter(torch.nn.Module):
+    """
+    Learnable Geometric Scattering Module.
+    https://arxiv.org/pdf/2208.07458.pdf
 
-    def __init__(self, in_channels, trainable_laziness=False):
+    Quoting the paper:
+        1. The geometric scattering transform consists of a cascade of graph filters
+        constructed from a left stochastic diffusion matrix P := 1/2 (I + W D^-1),
+        which corresponds to transition probabilities of a lazy random walk Markov process.
+        2. Laziness := the probability of staying at the node instead of moving to a neighbor.
+    """
 
-        super().__init__()
+    def __init__(self, in_channels: int, trainable_laziness: bool = False) -> None:
+        super(Scatter, self).__init__()
+
         self.in_channels = in_channels
         self.trainable_laziness = trainable_laziness
+
         self.diffusion_layer1 = Diffuse(
-            in_channels, in_channels, trainable_laziness)
+            in_channels=in_channels,
+            out_channels=in_channels,
+            trainable_laziness=trainable_laziness)
+
         self.diffusion_layer2 = Diffuse(
-            4 * in_channels, 4 * in_channels, trainable_laziness
+            in_channels=4*in_channels,
+            out_channels=4*in_channels,
+            trainable_laziness=trainable_laziness
         )
+
         self.wavelet_constructor = torch.nn.Parameter(torch.tensor([
-            [0, -1.0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            [0, -1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
             [0, 0, -1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
             [0, 0, 0, 0, -1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0],
             [0, 0, 0, 0, 0, 0, 0, 0, -1, 0, 0, 0, 0, 0, 0, 0, 1]
-        ], requires_grad=True))
+        ], dtype=torch.float, requires_grad=True))
 
     def forward(self, data):
 
@@ -91,18 +108,20 @@ class Scatter(torch.nn.Module):
         return 11 * 4 * self.in_channels
 
 
-def scatter_moments(graph, batch_indices, moments_returned=4):
-    """ Compute specified statistical coefficients for each feature of each graph passed.
-        The graphs expected are disjoint subgraphs within a single graph, whose feature tensor is passed as argument "graph."
-        "batch_indices" connects each feature tensor to its home graph.
-        "Moments_returned" specifies the number of statistical measurements to compute.
-        If 1, only the mean is returned. If 2, the mean and variance. If 3, the mean, variance, and skew. If 4, the mean, variance, skew, and kurtosis.
-        The output is a dictionary. You can obtain the mean by calling output["mean"] or output["skew"], etc.
+def scatter_moments(graph: torch.Tensor, batch_indices: torch.Tensor, moments_returned: int = 4) -> torch.Tensor:
+    """
+    Compute specified statistical coefficients for each feature of each graph passed.
+        `graph`: The feature tensors of disjoint subgraphs within a single graph.
+        `batch_indices`: [B].
+    "Moments_returned" specifies the number of statistical measurements to compute.
+    If 1, only the mean is returned. If 2, the mean and variance. If 3, the mean, variance, and skew. If 4, the mean, variance, skew, and kurtosis.
     """
 
-    # Step 1: Aggregate the features of each mini-batch graph into its own tensor
-    graph_features = [torch.zeros(0).to(graph)
-                      for i in range(torch.max(batch_indices) + 1)]
+    # Step 1: Aggregate the features of each mini-batch graph into its own tensor.
+    graph_features = [torch.zeros(0).to(graph.device)
+                      for _ in range(torch.max(batch_indices) + 1)]
+    import pdb
+    pdb.set_trace()
 
     for i, node_features in enumerate(graph):
 

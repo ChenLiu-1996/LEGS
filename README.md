@@ -1,5 +1,5 @@
 # LEarnable Geometric Scattering (LEGS)
-Krishnaswamy Lab, Yale University
+### Krishnaswamy Lab, Yale University
 
 Rewritten and updated code base for the central piece in a series of publications, including:
 ```

@@ -6,7 +6,7 @@ import torch
 import torch.utils
 import yaml
 from data_utils import ZINCDataset, split_dataset
-from models import TSNet
+from models import LEGSNet
 from torch_geometric.data import Dataset
 from torch_geometric.loader import DataLoader
 from tqdm import trange
@@ -55,7 +55,7 @@ def pretrain_model(config: AttributeHashmap) -> None:
 
     dataset, train_loader, val_loader, test_loader = prepare_dataset(config)
 
-    model = TSNet(
+    model = LEGSNet(
         in_channels=dataset.num_node_features,
         out_channels=dataset.num_classes,
         trainable_laziness=False
