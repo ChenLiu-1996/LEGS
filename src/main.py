@@ -1,4 +1,5 @@
 import argparse
+import os
 from typing import Tuple
 
 import torch
@@ -9,12 +10,23 @@ from models import TSNet
 from torch_geometric.data import Dataset
 from torch_geometric.loader import DataLoader
 from tqdm import trange
-from utils import AttributeHashmap, EarlyStopping, accuracy
+from utils import AttributeHashmap, EarlyStopping, compute_metrics, log
 
 
-def parse_settings(config: AttributeHashmap) -> AttributeHashmap:
-    # type issues
+def parse_config(config: AttributeHashmap) -> AttributeHashmap:
+    config.log_dir = config.log_folder + \
+        os.path.basename(config.config_file_name).rstrip('.yaml') + '_log.txt'
+
+    # Resolve type issues.
     config.learning_rate = float(config.learning_rate)
+
+    # Initialize log file.
+    log_str = 'Config: \n\n'
+    for key in config.keys():
+        log_str += '%s: %s\n' % (key, config[key])
+    log_str += '\n\nTraining History: \n\n'
+    log(log_str, filepath=config.log_dir, to_console=True)
+
     return config
 
 
@@ -24,7 +36,7 @@ def prepare_dataset(config: AttributeHashmap) -> Tuple[Dataset, DataLoader, Data
 
     split_ratios = [float(c) for c in config.train_val_test_ratio.split(':')]
     train_ds, val_ds, test_ds = split_dataset(
-        dataset, splits=split_ratios, seed=config.random_seed)
+        dataset, splits=split_ratios, random_seed=config.random_seed)
 
     train_loader = DataLoader(train_ds, batch_size=config.batch_size,
                               shuffle=True, num_workers=config.num_workers)
@@ -32,6 +44,7 @@ def prepare_dataset(config: AttributeHashmap) -> Tuple[Dataset, DataLoader, Data
                             shuffle=False, num_workers=config.num_workers)
     test_loader = DataLoader(test_ds, batch_size=len(test_ds),
                              shuffle=False, num_workers=config.num_workers)
+
     return dataset, train_loader, val_loader, test_loader
 
 
@@ -42,10 +55,9 @@ def pretrain_model(config: AttributeHashmap) -> None:
 
     dataset, train_loader, val_loader, test_loader = prepare_dataset(config)
 
-    # print("done data loading")
     model = TSNet(
-        dataset.num_node_features,
-        dataset.num_classes,
+        in_channels=dataset.num_node_features,
+        out_channels=dataset.num_classes,
         trainable_laziness=False
     )
 
@@ -72,22 +84,25 @@ def pretrain_model(config: AttributeHashmap) -> None:
 
         model.eval()
         with torch.no_grad():
-            val_acc, _ = accuracy(model, val_loader, loss_fn, config.device)
+            val_loss, val_MAE, val_MSE = compute_metrics(metrics=['loss', 'MAE', 'MSE'], model=model, loader=val_loader,
+                                                         loss_fn=loss_fn, device=config.device)
 
-        print('Epoch (%s/%s), val acc: %s' %
-              (epoch_idx, config.max_epochs, val_acc))
+        log('Epoch (%d/%d), val loss: %.6f, MAE by property: %s, MSE by property: %s' %
+            (epoch_idx, config.max_epochs, val_loss, val_MAE, val_MSE), filepath=config.log_dir, to_console=False)
 
-        if early_stopper.step(val_acc):
+        if early_stopper.step(val_loss):
             print("Early stopping criterion met. Ending training.")
             # if the validation accuracy decreases for eight consecutive epochs, break.
             break
 
     with torch.no_grad():
-        test_acc, _ = accuracy(model, test_loader, loss_fn, config.device)
-    print('Final test acc: %s' % test_acc)
+        test_loss, test_MAE, test_MSE = compute_metrics(metrics=['loss', 'MAE', 'MSE'], model=model, loader=test_loader,
+                                                        loss_fn=loss_fn, device=config.device)
+    log('Final model, test loss: %.6f, MAE by property: %s, MSE by property: %s' %
+        (test_loss, test_MAE, test_MSE), filepath=config.log_dir, to_console=False)
 
     # print('saving scatter model')
-    # torch.save(model.scatter.state_dict(), str(save_dir) + f"IMiD_weights.npy")
+    # torch.save(model.scatter.state_dict(), str(save_folder) + f"IMiD_weights.npy")
 
 
 if __name__ == '__main__':
@@ -100,12 +115,16 @@ if __name__ == '__main__':
     args = vars(parser.parse_args())
 
     args = AttributeHashmap(args)
-    config = AttributeHashmap(yaml.safe_load(open(args.config)))
-    config = parse_settings(config)
 
+    # Load the config yaml file and store it as a Attribute Hashmap.
+    config = AttributeHashmap(yaml.safe_load(open(args.config)))
+    config.config_file_name = args.config
+    config = parse_config(config)
+
+    # Automatically detect and assign device.
     config.device = torch.device(
         "cuda" if torch.cuda.is_available() else "cpu")
 
     torch.manual_seed(config.random_seed)
-    if config.pretrain:
+    if args.pretrain:
         pretrain_model(config)
