@@ -120,8 +120,6 @@ def scatter_moments(graph: torch.Tensor, batch_indices: torch.Tensor, moments_re
     # Step 1: Aggregate the features of each mini-batch graph into its own tensor.
     graph_features = [torch.zeros(0).to(graph.device)
                       for _ in range(torch.max(batch_indices) + 1)]
-    import pdb
-    pdb.set_trace()
 
     for i, node_features in enumerate(graph):
 

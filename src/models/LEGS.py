@@ -11,17 +11,14 @@ class LEGSNet(torch.nn.Module):
     Learnable Geometric Scattering Network.
     `in_channels`:        number of input channels.
     `out_channels`:       number of output channels.
-    `edge_in_channels`:   ???
-    `trainable_laziness`: whether the "laziness" of the LazyLayer (inside `Scatter`) is trainable.
+    `trainable_laziness`: whether the "laziness" (probability of not moving to neighbor) is trainable.
     """
 
-    def __init__(self, in_channels: int, out_channels: int,
-                 edge_in_channels=None, trainable_laziness: bool = False) -> None:
+    def __init__(self, in_channels: int, out_channels: int, trainable_laziness: bool = False) -> None:
 
         super().__init__()
         self.in_channels = in_channels
         self.out_channels = out_channels
-        self.edge_in_channels = edge_in_channels
         self.trainable_laziness = trainable_laziness
         self.scatter = Scatter(
             in_channels, trainable_laziness=trainable_laziness)

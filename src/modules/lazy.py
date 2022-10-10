@@ -1,20 +1,20 @@
 import torch
 
 
-class LazyLayer(torch.nn.Module):
+class LazinessLayer(torch.nn.Module):
     """
     Currently a single elementwise multiplication with one laziness parameter per
-    channel. This is run through a softmax so that this is a real laziness parameter.
+    channel. This is run through a sigmoid so that this is a real laziness parameter.
     """
 
-    def __init__(self, n):
+    def __init__(self, in_channels: int) -> None:
         super().__init__()
-        self.weights = torch.nn.Parameter(torch.Tensor(2, n))
+        self.laziness_logit = torch.nn.Parameter(torch.zeros(in_channels))
 
-    def forward(self, x, propogated):
-        inp = torch.stack((x, propogated), dim=1)
-        s_weights = torch.nn.functional.softmax(self.weights, dim=0)
-        return torch.sum(inp * s_weights, dim=-2)
+    def forward(self, x: torch.Tensor, propagated: torch.Tensor) -> torch.Tensor:
+        laziness = torch.nn.functional.sigmoid(self.laziness_logit)
+        laziness = torch.unsqueeze(laziness, dim=1)
+        return laziness * x + (1 - laziness) * propagated
 
-    def reset_parameters(self):
-        torch.nn.init.ones_(self.weights)
+    def reset_parameters(self) -> None:
+        torch.nn.init.zeros_(self.weights)
