@@ -2,7 +2,7 @@ import torch
 from modules import Scatter
 from torch.nn import Linear
 
-# Author: Alex Tong
+
 # Reference: Data-Driven Learning of Geometric Scattering Networks, IEEE Machine Learning for Signal Processing Workshop 2021
 
 

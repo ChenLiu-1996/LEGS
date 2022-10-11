@@ -108,13 +108,17 @@ class Scatter(torch.nn.Module):
         return 11 * 4 * self.in_channels
 
 
-def scatter_moments(graph: torch.Tensor, batch_indices: torch.Tensor, moments_returned: int = 4) -> torch.Tensor:
+def scatter_moments(graph: torch.Tensor, batch_indices: torch.Tensor,
+                    moments_returned: int = 4, inf_val: int = 1e15) -> torch.Tensor:
     """
     Compute specified statistical coefficients for each feature of each graph passed.
         `graph`: The feature tensors of disjoint subgraphs within a single graph.
+            [N, in_channels] where N := number of nodes
         `batch_indices`: [B].
-    "Moments_returned" specifies the number of statistical measurements to compute.
-    If 1, only the mean is returned. If 2, the mean and variance. If 3, the mean, variance, and skew. If 4, the mean, variance, skew, and kurtosis.
+        `moments_returned`: Specifies the number of statistical measurements to compute.
+            If 1, only the mean is returned. If 2, the mean and variance.
+            If 3, the mean, variance, and skew. If 4, the mean, variance, skew, and kurtosis.
+        `inf_val`: A value bigger than this shall be treated as infinity.
     """
 
     # Step 1: Aggregate the features of each mini-batch graph into its own tensor.
@@ -122,8 +126,8 @@ def scatter_moments(graph: torch.Tensor, batch_indices: torch.Tensor, moments_re
                       for _ in range(torch.max(batch_indices) + 1)]
 
     for i, node_features in enumerate(graph):
-
-        # Sort the graph features by graph, according to batch_indices. For each graph, create a tensor whose first row is the first element of each feature, etc.
+        # Sort the graph features by graph, according to batch_indices.
+        # For each graph, create a tensor whose first row is the first element of each feature, etc.
         # print("node features are", node_features)
 
         if (len(graph_features[batch_indices[i]]) == 0):
@@ -134,74 +138,59 @@ def scatter_moments(graph: torch.Tensor, batch_indices: torch.Tensor, moments_re
             graph_features[batch_indices[i]] = torch.cat(
                 (graph_features[batch_indices[i]], node_features.view(-1, 1, 1)), dim=1)  # concatenates along columns
 
-    statistical_moments = {"mean": torch.zeros(0).to(graph)}
-
-    if moments_returned >= 2:
-        statistical_moments["variance"] = torch.zeros(0).to(graph)
-    if moments_returned >= 3:
-        statistical_moments["skew"] = torch.zeros(0).to(graph)
-    if moments_returned >= 4:
-        statistical_moments["kurtosis"] = torch.zeros(0).to(graph)
+    # Instatiate the correct set of moments to return.
+    assert moments_returned in [1, 2, 3, 4], \
+        "`scatter_moments`: only supports `moments_returned` of the following values: 1, 2, 3, 4."
+    moments_keys = ['mean', 'variance', 'skew', 'kurtosis']
+    moments_keys = moments_keys[:moments_returned]
+    statistical_moments = {}
+    for key in moments_keys:
+        statistical_moments[key] = torch.zeros(0).to(graph)
 
     for data in graph_features:
 
         data = data.squeeze()
 
-        def m(i):  # ith moment, computed with derivation data
-            return torch.mean(deviation_data ** i, axis=1)
-
         mean = torch.mean(data, dim=1, keepdim=True)
 
         if moments_returned >= 1:
-            statistical_moments["mean"] = torch.cat(
-                (statistical_moments["mean"], mean.T), dim=0
+            statistical_moments['mean'] = torch.cat(
+                (statistical_moments['mean'], mean.T), dim=0
             )
 
         # produce matrix whose every row is data row - mean of data row
-
-        # for a in mean:
-        #    mean_row = torch.ones(data.shape[1]).to( * a
-        #    tuple_collect.append(
-        #        mean_row[None, ...]
-        #    )  # added dimension to concatenate with differentiation of rows
-        # each row contains the deviation of the elements from the mean of the row
-
-        deviation_data = data - mean
+        std = data - mean
 
         # variance: difference of u and u mean, squared element wise, summed and divided by n-1
-        variance = m(2)
-
+        variance = torch.mean(std**2, axis=1)
         if moments_returned >= 2:
-            statistical_moments["variance"] = torch.cat(
-                (statistical_moments["variance"], variance[None, ...]), dim=0
+            statistical_moments['variance'] = torch.cat(
+                (statistical_moments['variance'], variance[None, ...]), dim=0
             )
 
         # skew: 3rd moment divided by cubed standard deviation (sd = sqrt variance), with correction for division by zero (inf -> 0)
-        skew = m(3)  # / (variance ** (3 / 2))
-        skew[
-            skew > 1000000000000000
-        ] = 0  # multivalued tensor division by zero produces inf
-        skew[
-            skew != skew
-        ] = 0  # single valued division by 0 produces nan. In both cases we replace with 0.
+        skew = variance = torch.mean(std**3, axis=1)
+        # Multivalued tensor division by zero produces inf.
+        skew[skew > inf_val] = 0
+        # Single valued division by 0 produces nan.
+        skew[skew != skew] = 0
         if moments_returned >= 3:
-            statistical_moments["skew"] = torch.cat(
-                (statistical_moments["skew"], skew[None, ...]), dim=0
+            statistical_moments['skew'] = torch.cat(
+                (statistical_moments['skew'], skew[None, ...]), dim=0
             )
 
         # kurtosis: fourth moment, divided by variance squared. Using Fischer's definition to subtract 3 (default in scipy)
-        kurtosis = m(4)  # / (variance ** 2) - 3
-        kurtosis[kurtosis > 1000000000000000] = -3
+        kurtosis = torch.mean(std**4, axis=1) - 3
+        kurtosis[kurtosis > inf_val] = -3
         kurtosis[kurtosis != kurtosis] = -3
         if moments_returned >= 4:
-            statistical_moments["kurtosis"] = torch.cat(
-                (statistical_moments["kurtosis"], kurtosis[None, ...]), dim=0
+            statistical_moments['kurtosis'] = torch.cat(
+                (statistical_moments['kurtosis'], kurtosis[None, ...]), dim=0
             )
 
-    # Concatenate into one tensor (alex)
+    # Concatenate into one tensor.
     statistical_moments = torch.cat(
-        [v for k, v in statistical_moments.items()], axis=1)
-    #statistical_moments = torch.cat([statistical_moments['mean'],statistical_moments['variance']],axis=1)
+        [statistical_moments[key] for key in moments_keys], axis=1)
 
     return statistical_moments
 
