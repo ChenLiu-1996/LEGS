@@ -47,7 +47,7 @@ class Scatter(torch.nn.Module):
             trainable_laziness=trainable_laziness
         )
 
-        #
+        # Weightings for the 0th to 2^4th diffusion wavelets.
         self.wavelet_constructor = torch.nn.Parameter(torch.tensor([
             [0, -1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
             [0, 0, -1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
