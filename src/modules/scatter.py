@@ -25,9 +25,16 @@ class Scatter(torch.nn.Module):
         `graph_data`:         torch_geometric.data.Data or torch_geometric.data.batch.Batch
                               with fields graph_data.x (node features) and graph_data.edge_index
 
+    Technical details:
+        The Geometric Scattering Process is formulated as several (2 in this implementation)
+        [diffusion, scattering] blocks followed by a final aggregation block.
+        In each [diffusion, scattering] block, there are (1+2^J) diffusion steps and
+        J scattering filters involved. J represents the "order" of diffusion.
+        In this implementation, J is 4.
+
     Math:
-    `P`:   diffusion matrices.
-    `Psi`: graph wavelet matrices.
+        `P`:   diffusion matrices.
+        `Psi`: graph wavelet matrices.
     """
 
     def __init__(self, in_channels: int, trainable_laziness: bool = False) -> None:
@@ -64,57 +71,60 @@ class Scatter(torch.nn.Module):
 
         x, edge_index = graph_data.x, graph_data.edge_index
 
-        # 0th scattering moments.
+        ''' Pre-Diffusion/Scattering round 1 '''
+        # Scattering round 0 outputs := input.
         S0 = x[:, :, None]
-        diffusion_matrices = [S0]
+
+        ''' Diffusion round 1 '''
+        diffusion_outputs = [S0]
+        # Let the scattering outcome go through 2^4 diffusion steps.
         for _ in range(2**4):
-            diffusion_matrices.append(self.diffusion_layer1(
-                diffusion_matrices[-1], edge_index))
-        # Combine the diffusion levels into a single tensor.
-        # Diffusion level 1.
-        diffusion_levels = torch.stack(diffusion_matrices)
+            diffusion_outputs.append(self.diffusion_layer1(
+                diffusion_outputs[-1], edge_index))
+        # Stack the diffusion outputs into a single tensor.
+        # This represents [P^0, P^1, ..., P^2^J]
+        diffusion_outputs = torch.stack(diffusion_outputs)
 
-        # Reshape the 3d tensor into a 2d tensor and multiply with the wavelet_constructor matrix
+        ''' Scattering round 1 '''
         # This simulates the below subtraction:
-        # filter1 = avgs[1] - avgs[2]
-        # filter2 = avgs[2] - avgs[4]
-        # filter3 = avgs[4] - avgs[8]
-        # filter4 = avgs[8] - avgs[16]
-        subtracted = torch.matmul(
-            self.wavelet_constructor, diffusion_levels.view(self.wavelet_constructor.shape[-1], -1))
-        # reshape into given input shape
-        subtracted = subtracted.view(4, x.shape[0], x.shape[1])
+        #   psi_j = P^2^(j-1) - P^2^j for 0<=j<=J=4
+        # Specifically, the implementation directly takes the signal into the process:
+        #   psi_j x = (P^2^(j-1) - P^2^j) x
+        scattering_outputs = torch.matmul(
+            self.wavelet_constructor, diffusion_outputs.view(self.wavelet_constructor.shape[-1], -1))
+        scattering_outputs = scattering_outputs.view(4, x.shape[0], x.shape[1])
 
-        # 1st scattering moments.
+        ''' Pre-Diffusion/Scattering round 2 '''
+        # Scattering round 1 outputs.
         S1 = torch.abs(
-            torch.transpose(torch.transpose(subtracted, 0, 1), 1, 2))  # transpose the dimensions to match previous
+            torch.transpose(torch.transpose(scattering_outputs, 0, 1), 1, 2))  # transpose the dimensions to match previous
 
-        # Perform a second wave of diffusing, on the recently diffused.
-        diffusion_matrices = [S1]
-        for i in range(2**4):  # diffuse over diffusions
-            diffusion_matrices.append(self.diffusion_layer2(
-                diffusion_matrices[-1], edge_index))
-        # Diffusion level 2.
-        diffusion_levels = torch.stack(diffusion_matrices)
+        ''' Diffusion round 2 '''
+        diffusion_outputs = [S1]
+        for _ in range(2**4):
+            diffusion_outputs.append(self.diffusion_layer2(
+                diffusion_outputs[-1], edge_index))
+        diffusion_outputs = torch.stack(diffusion_outputs)
 
-        # Having now generated the diffusion levels, we can cmobine them as before
-        subtracted = torch.matmul(self.wavelet_constructor, diffusion_levels.view(
+        ''' Scattering round 2 '''
+        scattering_outputs = torch.matmul(self.wavelet_constructor, diffusion_outputs.view(
             self.wavelet_constructor.shape[-1], -1))
-        # reshape into given input shape
-        subtracted = subtracted.view(4, S1.shape[0], S1.shape[1], S1.shape[2])
-        subtracted = torch.transpose(subtracted, 0, 1)
-        subtracted = torch.abs(subtracted.reshape(-1, self.in_channels, 4))
-        S2_swapped = torch.reshape(torch.transpose(
-            subtracted, 1, 2), (-1, 16, self.in_channels))
+        scattering_outputs = scattering_outputs.view(
+            4, S1.shape[0], S1.shape[1], S1.shape[2])
+        scattering_outputs = torch.transpose(scattering_outputs, 0, 1)
+        scattering_outputs = torch.abs(
+            scattering_outputs.reshape(-1, self.in_channels, 4))
+        scattering_outputs = torch.reshape(torch.transpose(
+            scattering_outputs, 1, 2), (-1, 16, self.in_channels))
 
-        # 2nd scattering moments.
-        S2 = S2_swapped[:, feng_filters()]
+        # Scattering round 2 outputs.
+        S2 = scattering_outputs[:, feng_filters()]
 
+        ''' Aggregation after all [diffusion, scattering] blocks '''
         x = torch.cat([S0, S1], dim=2)
         x = torch.transpose(x, 1, 2)
         x = torch.cat([x, S2], dim=1)
 
-        #x = scatter_mean(x, batch, dim=0)
         if hasattr(graph_data, 'batch'):
             x = self.aggregation_submodule(
                 graph=x, batch_indices=graph_data.batch, moments_returned=4)

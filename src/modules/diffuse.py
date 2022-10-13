@@ -32,8 +32,7 @@ class Diffuse(MessagePassing):
          Note: with learnable laziness, the two 1/2 factors are adjustable. See `LazinessLayer`.
 
     The forward function is implementing diffusion process:
-    `P x = 1/2 I + 1/2 W D^{-1}`
-        with `propagated = W D^{-1} x`
+    `P x = (1/2 I + 1/2 W D^{-1}) x` where `W D^{-1} x` is represented by the variable `propagated`.
     """
 
     def __init__(self, in_channels: int, out_channels: int,
