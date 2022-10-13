@@ -33,8 +33,10 @@ class Scatter(torch.nn.Module):
         In this implementation, J is 4.
 
     Math:
-        `P`:   diffusion matrices.
-        `Psi`: graph wavelet matrices.
+        `P`:   diffusion matrix.
+        `W`:   weighted adjacency matrix.
+        `D`:   degree matrix.
+        `Psi`: graph wavelet filter.
     """
 
     def __init__(self, in_channels: int, trainable_laziness: bool = False) -> None:
