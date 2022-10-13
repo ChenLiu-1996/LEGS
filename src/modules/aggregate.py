@@ -43,9 +43,9 @@ def statistical_moments(graph: torch.Tensor, batch_indices: torch.Tensor,
         # For each graph, create a tensor whose first row is the first element of each feature, etc.
         # print("node features are", node_features)
 
-        if (len(graph_features[batch_indices[i]]) == 0):
+        if len(graph_features[batch_indices[i]]) == 0:
             # If this is the first feature added to this graph, fill it in with the features.
-            # .view(-1,1,1) changes [1,2,3] to [[1],[2],[3]], so that we can add each column to the respective row.
+            # .view(-1,1,1) changes [x1,x2,x3] to [[x1],[x2],[x3]], so that we can add each column to the respective row.
             graph_features[batch_indices[i]] = node_features.view(-1, 1, 1)
         else:
             graph_features[batch_indices[i]] = torch.cat(

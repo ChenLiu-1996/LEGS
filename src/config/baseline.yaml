@@ -2,9 +2,9 @@ dataset_dir: '/gpfs/gibbs/pi/krishnaswamy_smita/cl2482/DirectedGNN/rewritten_LEG
 save_folder: '/gpfs/gibbs/pi/krishnaswamy_smita/cl2482/DirectedGNN/rewritten_LEGS/trained_models/'
 log_folder: '/gpfs/gibbs/pi/krishnaswamy_smita/cl2482/DirectedGNN/rewritten_LEGS/logs/'
 learning_rate: 1e-4
-max_epochs: 200
+max_epochs: 100
 batch_size: 32
-patience: 10
+patience: 5
 num_workers: 0
 random_seed: 1
 train_val_test_ratio: '8:1:1'

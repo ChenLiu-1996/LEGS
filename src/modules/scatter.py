@@ -37,13 +37,16 @@ class Scatter(torch.nn.Module):
         `W`:   weighted adjacency matrix.
         `D`:   degree matrix.
         `Psi`: graph wavelet filter.
+        `J`:   scattering order.
     """
 
-    def __init__(self, in_channels: int, trainable_laziness: bool = False) -> None:
+    def __init__(self, in_channels: int, trainable_laziness: bool = False, scattering_order: int = 4) -> None:
         super(Scatter, self).__init__()
 
         self.in_channels = in_channels
         self.trainable_laziness = trainable_laziness
+        # `J`. Currently only implemented for 4.
+        self.scattering_order = scattering_order
 
         self.diffusion_layer1 = Diffuse(
             in_channels=in_channels,
@@ -56,7 +59,7 @@ class Scatter(torch.nn.Module):
             trainable_laziness=trainable_laziness
         )
 
-        # Weightings for the 0th to 2^4th diffusion wavelets.
+        # Weightings for the 0th to 2^Jth diffusion wavelets.
         self.wavelet_constructor = torch.nn.Parameter(torch.tensor([
             [0, -1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
             [0, 0, -1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
@@ -73,14 +76,13 @@ class Scatter(torch.nn.Module):
 
         x, edge_index = graph_data.x, graph_data.edge_index
 
-        ''' Pre-Diffusion/Scattering round 1 '''
-        # Scattering round 0 outputs := input.
+        # Scattering round 0 outputs := input with dims [node, feature, J].
         S0 = x[:, :, None]
 
         ''' Diffusion round 1 '''
         diffusion_outputs = [S0]
         # Let the scattering outcome go through 2^4 diffusion steps.
-        for _ in range(2**4):
+        for _ in range(2**self.scattering_order):
             diffusion_outputs.append(self.diffusion_layer1(
                 diffusion_outputs[-1], edge_index))
         # Stack the diffusion outputs into a single tensor.
@@ -92,18 +94,17 @@ class Scatter(torch.nn.Module):
         #   psi_j = P^2^(j-1) - P^2^j for 0<=j<=J=4
         # Specifically, the implementation directly takes the signal into the process:
         #   psi_j x = (P^2^(j-1) - P^2^j) x
-        scattering_outputs = torch.matmul(
-            self.wavelet_constructor, diffusion_outputs.view(self.wavelet_constructor.shape[-1], -1))
-        scattering_outputs = scattering_outputs.view(4, x.shape[0], x.shape[1])
-
-        ''' Pre-Diffusion/Scattering round 2 '''
+        scattering_outputs = torch.matmul(self.wavelet_constructor, diffusion_outputs.view(
+            self.wavelet_constructor.shape[-1], -1))
+        scattering_outputs = scattering_outputs.view(
+            self.scattering_order, S0.shape[0], S0.shape[1])
         # Scattering round 1 outputs.
-        S1 = torch.abs(
-            torch.transpose(torch.transpose(scattering_outputs, 0, 1), 1, 2))  # transpose the dimensions to match previous
+        # [J, node, feature] to [node, feature, J]
+        S1 = torch.abs(scattering_outputs.permute(1, 2, 0))
 
         ''' Diffusion round 2 '''
         diffusion_outputs = [S1]
-        for _ in range(2**4):
+        for _ in range(2**self.scattering_order):
             diffusion_outputs.append(self.diffusion_layer2(
                 diffusion_outputs[-1], edge_index))
         diffusion_outputs = torch.stack(diffusion_outputs)
@@ -112,20 +113,16 @@ class Scatter(torch.nn.Module):
         scattering_outputs = torch.matmul(self.wavelet_constructor, diffusion_outputs.view(
             self.wavelet_constructor.shape[-1], -1))
         scattering_outputs = scattering_outputs.view(
-            4, S1.shape[0], S1.shape[1], S1.shape[2])
-        scattering_outputs = torch.transpose(scattering_outputs, 0, 1)
-        scattering_outputs = torch.abs(
-            scattering_outputs.reshape(-1, self.in_channels, 4))
-        scattering_outputs = torch.reshape(torch.transpose(
-            scattering_outputs, 1, 2), (-1, 16, self.in_channels))
-
+            self.scattering_order, S1.shape[0], S1.shape[1], S1.shape[2])
+        scattering_outputs = scattering_outputs.permute(1, 0, 3, 2)
+        scattering_outputs = scattering_outputs.reshape(
+            S1.shape[0], self.scattering_order**2, S1.shape[1])
         # Scattering round 2 outputs.
-        S2 = scattering_outputs[:, feng_filters()]
+        S2 = torch.abs(scattering_outputs[:, feng_filters()])
 
         ''' Aggregation after all [diffusion, scattering] blocks '''
-        x = torch.cat([S0, S1], dim=2)
-        x = torch.transpose(x, 1, 2)
-        x = torch.cat([x, S2], dim=1)
+        S0, S1 = S0.permute(0, 2, 1), S1.permute(0, 2, 1)
+        x = torch.cat([S0, S1, S2], dim=1)
 
         if hasattr(graph_data, 'batch'):
             x = self.aggregation_submodule(
