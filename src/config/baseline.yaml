@@ -1,7 +1,7 @@
 dataset_dir: '/gpfs/gibbs/pi/krishnaswamy_smita/cl2482/DirectedGNN/rewritten_LEGS/data/IMiD_smiles.npy'
 save_folder: '/gpfs/gibbs/pi/krishnaswamy_smita/cl2482/DirectedGNN/rewritten_LEGS/trained_models/'
 log_folder: '/gpfs/gibbs/pi/krishnaswamy_smita/cl2482/DirectedGNN/rewritten_LEGS/logs/'
-learning_rate: 1e-3
+learning_rate: 1e-4
 max_epochs: 200
 batch_size: 32
 patience: 10

@@ -64,7 +64,7 @@ def pretrain_model(config: AttributeHashmap) -> None:
     model = model.to(config.device)
 
     optimizer = torch.optim.Adam(model.parameters(), lr=config.learning_rate)
-    loss_fn = torch.nn.CrossEntropyLoss()
+    loss_fn = torch.nn.MSELoss()
     early_stopper = EarlyStopping(
         mode='min', patience=config.patience, percentage=False)
 
@@ -91,8 +91,8 @@ def pretrain_model(config: AttributeHashmap) -> None:
             (epoch_idx, config.max_epochs, val_loss, val_MAE, val_MSE), filepath=config.log_dir, to_console=False)
 
         if early_stopper.step(val_loss):
+            # If the validation accuracy decreases for eight consecutive epochs, break.
             print("Early stopping criterion met. Ending training.")
-            # if the validation accuracy decreases for eight consecutive epochs, break.
             break
 
     with torch.no_grad():

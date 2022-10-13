@@ -4,6 +4,7 @@ import numpy as np
 import torch
 from pysmiles import read_smiles
 from torch.utils.data import Dataset
+from torch_geometric.data import Data
 from utils import from_networkx_custom
 
 logging.getLogger('pysmiles').setLevel(logging.CRITICAL)
@@ -12,6 +13,10 @@ logging.getLogger('pysmiles').setLevel(logging.CRITICAL)
 class ZINCDataset(Dataset):
     """
     ZINC Tranch data
+
+    Returned `graph_data`: a torch_geometric.data.Data instance, where
+                           graph_data.x is the node features and
+                           graph_data.y is the properties.
     """
 
     def __init__(self, file_name, transform=None, prop_stat_dict=None, include_ki=False):
@@ -38,68 +43,68 @@ class ZINCDataset(Dataset):
 
         return len(self.smi)
 
-    def __getitem__(self, idx):
+    def __getitem__(self, idx: int) -> Data:
 
         smi = self.smi[idx]
 
-        props = np.zeros(self.num_classes)
+        properties = np.zeros(self.num_classes)
         no_zscore = np.zeros(self.num_classes)
 
         if self.stats != None:
-            # we want to zscore
+            # We want to zscore.
             for i, entry in enumerate(self.prop_list):
                 prop_value = self.tranch[smi][entry]
                 z_scored = (
                     prop_value - self.stats[entry]['mean']) / self.stats[entry]['std']
-                props[i] = z_scored
+                properties[i] = z_scored
         else:
             for i, entry in enumerate(self.prop_list):
                 prop_value = self.tranch[smi][entry]
-                props[i] = prop_value
+                properties[i] = prop_value
                 no_zscore[i] = prop_value
 
         mol = read_smiles(smi)
-        data = from_networkx_custom(mol)
+        graph_data = from_networkx_custom(mol)
 
-        data.no_zscore_props = no_zscore
-        data.y = torch.Tensor(np.array([props]))
+        graph_data.no_zscore_props = no_zscore
+        graph_data.y = torch.Tensor(np.array([properties]))
 
-        # place node features
-        node_feats = []
+        # Collect node features.
+        node_features = []
 
-        for i, entry in enumerate(data.element):
+        for i, entry in enumerate(graph_data.element):
 
-            node_feat = np.zeros(self.num_node_features)
+            node_feature = np.zeros(self.num_node_features)
 
             # one hot encoding of atoms
             if entry == 'C':
-                node_feat[0] = 1.
+                node_feature[0] = 1.
             elif entry == 'O':
-                node_feat[1] = 1.
+                node_feature[1] = 1.
             elif entry == 'N':
-                node_feat[2] = 1.
+                node_feature[2] = 1.
             elif entry == 'S':
-                node_feat[3] = 1.
+                node_feature[3] = 1.
 
             # pair encoding of atoms
             if entry == 'C' or entry == 'O':
-                node_feat[4] = 1.
+                node_feature[4] = 1.
             if entry == 'C' or entry == 'N':
-                node_feat[5] = 1.
+                node_feature[5] = 1.
             if entry == 'C' or entry == 'S':
-                node_feat[6] = 1.
+                node_feature[6] = 1.
             if entry == 'O' or entry == 'N':
-                node_feat[7] = 1.
+                node_feature[7] = 1.
             if entry == 'O' or entry == 'S':
-                node_feat[8] = 1.
+                node_feature[8] = 1.
             if entry == 'N' or entry == 'S':
-                node_feat[9] = 1.
+                node_feature[9] = 1.
 
-            node_feats.append(node_feat)
+            node_features.append(node_feature)
 
-        data.x = torch.Tensor(np.array(node_feats))
+        graph_data.x = torch.Tensor(np.array(node_features))
 
         if self.transform:
-            return self.transform(data)
+            return self.transform(graph_data)
         else:
-            return data
+            return graph_data

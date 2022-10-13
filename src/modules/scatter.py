@@ -1,18 +1,33 @@
-import torch
+from typing import Union
 
+import torch
+from torch_geometric.data import Data
+from torch_geometric.data.batch import Batch
+
+from .aggregate import Aggregate
 from .diffuse import Diffuse
 
 
 class Scatter(torch.nn.Module):
     """
-    Learnable Geometric Scattering Module.
-    https://arxiv.org/pdf/2208.07458.pdf
+    "The Scattering submodule" in https://arxiv.org/pdf/2208.07458.pdf.
 
     Quoting the paper:
         1. The geometric scattering transform consists of a cascade of graph filters
         constructed from a left stochastic diffusion matrix P := 1/2 (I + W D^-1),
         which corresponds to transition probabilities of a lazy random walk Markov process.
         2. Laziness := the probability of staying at the node instead of moving to a neighbor.
+
+    Init @params
+        `in_channels`:        number of input channels
+        `trainable_laziness`: whether the "laziness" (probability of not moving to neighbor) is trainable.
+    Forward @params
+        `graph_data`:         torch_geometric.data.Data or torch_geometric.data.batch.Batch
+                              with fields graph_data.x (node features) and graph_data.edge_index
+
+    Math:
+    `P`:   diffusion matrices.
+    `Psi`: graph wavelet matrices.
     """
 
     def __init__(self, in_channels: int, trainable_laziness: bool = False) -> None:
@@ -32,6 +47,7 @@ class Scatter(torch.nn.Module):
             trainable_laziness=trainable_laziness
         )
 
+        #
         self.wavelet_constructor = torch.nn.Parameter(torch.tensor([
             [0, -1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
             [0, 0, -1, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
@@ -39,19 +55,24 @@ class Scatter(torch.nn.Module):
             [0, 0, 0, 0, 0, 0, 0, 0, -1, 0, 0, 0, 0, 0, 0, 0, 1]
         ], dtype=torch.float, requires_grad=True))
 
-    def forward(self, data):
+        self.aggregation_submodule = Aggregate(
+            aggregation_method='statistical_moments')
 
-        x, edge_index = data.x, data.edge_index
-        s0 = x[:, :, None]
-        avgs = [s0]
-        for i in range(16):
-            avgs.append(self.diffusion_layer1(avgs[-1], edge_index))
-        for j in range(len(avgs)):
-            # add an extra dimension to each tensor to avoid data loss while concatenating TODO: is there a faster way to do this?
-            avgs[j] = avgs[j][None, :, :, :]
+    def forward(self, graph_data: Union[Data, Batch]):
+        # TODO: Still need to go through the `forward` function
+        # and cross-compare with the paper...
 
+        x, edge_index = graph_data.x, graph_data.edge_index
+
+        # 0th scattering moments.
+        S0 = x[:, :, None]
+        diffusion_matrices = [S0]
+        for _ in range(2**4):
+            diffusion_matrices.append(self.diffusion_layer1(
+                diffusion_matrices[-1], edge_index))
         # Combine the diffusion levels into a single tensor.
-        diffusion_levels = torch.cat(avgs)
+        # Diffusion level 1.
+        diffusion_levels = torch.stack(diffusion_matrices)
 
         # Reshape the 3d tensor into a 2d tensor and multiply with the wavelet_constructor matrix
         # This simulates the below subtraction:
@@ -60,139 +81,52 @@ class Scatter(torch.nn.Module):
         # filter3 = avgs[4] - avgs[8]
         # filter4 = avgs[8] - avgs[16]
         subtracted = torch.matmul(
-            self.wavelet_constructor, diffusion_levels.view(17, -1))
+            self.wavelet_constructor, diffusion_levels.view(self.wavelet_constructor.shape[-1], -1))
         # reshape into given input shape
         subtracted = subtracted.view(4, x.shape[0], x.shape[1])
-        s1 = torch.abs(
+
+        # 1st scattering moments.
+        S1 = torch.abs(
             torch.transpose(torch.transpose(subtracted, 0, 1), 1, 2))  # transpose the dimensions to match previous
 
-        # perform a second wave of diffusing, on the recently diffused.
-        avgs = [s1]
-        for i in range(16):  # diffuse over diffusions
-            avgs.append(self.diffusion_layer2(avgs[-1], edge_index))
-        # add an extra dimension to each diffusion level for concatenation
-        for i in range(len(avgs)):
-            avgs[i] = avgs[i][None, :, :, :]
-        diffusion_levels2 = torch.cat(avgs)
+        # Perform a second wave of diffusing, on the recently diffused.
+        diffusion_matrices = [S1]
+        for i in range(2**4):  # diffuse over diffusions
+            diffusion_matrices.append(self.diffusion_layer2(
+                diffusion_matrices[-1], edge_index))
+        # Diffusion level 2.
+        diffusion_levels = torch.stack(diffusion_matrices)
 
         # Having now generated the diffusion levels, we can cmobine them as before
-        subtracted2 = torch.matmul(
-            self.wavelet_constructor, diffusion_levels2.view(17, -1))
+        subtracted = torch.matmul(self.wavelet_constructor, diffusion_levels.view(
+            self.wavelet_constructor.shape[-1], -1))
         # reshape into given input shape
-        subtracted2 = subtracted2.view(
-            4, s1.shape[0], s1.shape[1], s1.shape[2])
-        subtracted2 = torch.transpose(subtracted2, 0, 1)
-        subtracted2 = torch.abs(subtracted2.reshape(-1, self.in_channels, 4))
-        s2_swapped = torch.reshape(torch.transpose(
-            subtracted2, 1, 2), (-1, 16, self.in_channels))
-        s2 = s2_swapped[:, feng_filters()]
+        subtracted = subtracted.view(4, S1.shape[0], S1.shape[1], S1.shape[2])
+        subtracted = torch.transpose(subtracted, 0, 1)
+        subtracted = torch.abs(subtracted.reshape(-1, self.in_channels, 4))
+        S2_swapped = torch.reshape(torch.transpose(
+            subtracted, 1, 2), (-1, 16, self.in_channels))
 
-        x = torch.cat([s0, s1], dim=2)
+        # 2nd scattering moments.
+        S2 = S2_swapped[:, feng_filters()]
+
+        x = torch.cat([S0, S1], dim=2)
         x = torch.transpose(x, 1, 2)
-        x = torch.cat([x, s2], dim=1)
+        x = torch.cat([x, S2], dim=1)
 
         #x = scatter_mean(x, batch, dim=0)
-        if hasattr(data, 'batch'):
-            x = scatter_moments(x, data.batch, 4)
-            # x = scatter_moments(x, torch.zeros(data.x.shape[0], dtype=torch.int32), 4)
+        if hasattr(graph_data, 'batch'):
+            x = self.aggregation_submodule(
+                graph=x, batch_indices=graph_data.batch, moments_returned=4)
         else:
-            x = scatter_moments(x, torch.zeros(
-                data.x.shape[0], dtype=torch.int32), 4)
-            # print('x returned shape', x.shape)
+            x = self.aggregation_submodule(graph=x, batch_indices=torch.zeros(
+                graph_data.x.shape[0], dtype=torch.int32), moments_returned=4)
 
         return x, self.wavelet_constructor
 
     def out_shape(self):
-
         # x * 4 moments * in
         return 11 * 4 * self.in_channels
-
-
-def scatter_moments(graph: torch.Tensor, batch_indices: torch.Tensor,
-                    moments_returned: int = 4, inf_val: int = 1e15) -> torch.Tensor:
-    """
-    Compute specified statistical coefficients for each feature of each graph passed.
-        `graph`: The feature tensors of disjoint subgraphs within a single graph.
-            [N, in_channels] where N := number of nodes
-        `batch_indices`: [B].
-        `moments_returned`: Specifies the number of statistical measurements to compute.
-            If 1, only the mean is returned. If 2, the mean and variance.
-            If 3, the mean, variance, and skew. If 4, the mean, variance, skew, and kurtosis.
-        `inf_val`: A value bigger than this shall be treated as infinity.
-    """
-
-    # Step 1: Aggregate the features of each mini-batch graph into its own tensor.
-    graph_features = [torch.zeros(0).to(graph.device)
-                      for _ in range(torch.max(batch_indices) + 1)]
-
-    for i, node_features in enumerate(graph):
-        # Sort the graph features by graph, according to batch_indices.
-        # For each graph, create a tensor whose first row is the first element of each feature, etc.
-        # print("node features are", node_features)
-
-        if (len(graph_features[batch_indices[i]]) == 0):
-            # If this is the first feature added to this graph, fill it in with the features.
-            # .view(-1,1,1) changes [1,2,3] to [[1],[2],[3]], so that we can add each column to the respective row.
-            graph_features[batch_indices[i]] = node_features.view(-1, 1, 1)
-        else:
-            graph_features[batch_indices[i]] = torch.cat(
-                (graph_features[batch_indices[i]], node_features.view(-1, 1, 1)), dim=1)  # concatenates along columns
-
-    # Instatiate the correct set of moments to return.
-    assert moments_returned in [1, 2, 3, 4], \
-        "`scatter_moments`: only supports `moments_returned` of the following values: 1, 2, 3, 4."
-    moments_keys = ['mean', 'variance', 'skew', 'kurtosis']
-    moments_keys = moments_keys[:moments_returned]
-    statistical_moments = {}
-    for key in moments_keys:
-        statistical_moments[key] = torch.zeros(0).to(graph)
-
-    for data in graph_features:
-
-        data = data.squeeze()
-
-        mean = torch.mean(data, dim=1, keepdim=True)
-
-        if moments_returned >= 1:
-            statistical_moments['mean'] = torch.cat(
-                (statistical_moments['mean'], mean.T), dim=0
-            )
-
-        # produce matrix whose every row is data row - mean of data row
-        std = data - mean
-
-        # variance: difference of u and u mean, squared element wise, summed and divided by n-1
-        variance = torch.mean(std**2, axis=1)
-        if moments_returned >= 2:
-            statistical_moments['variance'] = torch.cat(
-                (statistical_moments['variance'], variance[None, ...]), dim=0
-            )
-
-        # skew: 3rd moment divided by cubed standard deviation (sd = sqrt variance), with correction for division by zero (inf -> 0)
-        skew = variance = torch.mean(std**3, axis=1)
-        # Multivalued tensor division by zero produces inf.
-        skew[skew > inf_val] = 0
-        # Single valued division by 0 produces nan.
-        skew[skew != skew] = 0
-        if moments_returned >= 3:
-            statistical_moments['skew'] = torch.cat(
-                (statistical_moments['skew'], skew[None, ...]), dim=0
-            )
-
-        # kurtosis: fourth moment, divided by variance squared. Using Fischer's definition to subtract 3 (default in scipy)
-        kurtosis = torch.mean(std**4, axis=1) - 3
-        kurtosis[kurtosis > inf_val] = -3
-        kurtosis[kurtosis != kurtosis] = -3
-        if moments_returned >= 4:
-            statistical_moments['kurtosis'] = torch.cat(
-                (statistical_moments['kurtosis'], kurtosis[None, ...]), dim=0
-            )
-
-    # Concatenate into one tensor.
-    statistical_moments = torch.cat(
-        [statistical_moments[key] for key in moments_keys], axis=1)
-
-    return statistical_moments
 
 
 def feng_filters():

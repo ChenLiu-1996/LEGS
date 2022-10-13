@@ -16,7 +16,7 @@ def compute_metrics(metrics: List[str] = ['MAE', 'MSE', 'loss'],
         the predicted properties `pred` with dimension [B, K]
             B: batch dimension
             K: number of properties to predict
-    2. Ground truth is represented in `data.y`, with the same dimension as `pred`.
+    2. Ground truth is represented in `graph_data.y`, with the same dimension as `pred`.
     3. Since it's a regression/prediction task, it makes sense to use the following metrics:
         - MAE: mean absolute error (calculated per-property)
         - MSE: mean squared error (calculated per-property)
@@ -26,14 +26,14 @@ def compute_metrics(metrics: List[str] = ['MAE', 'MSE', 'loss'],
 
     mean_abs_err, mean_sqr_err, loss = None, None, None
 
-    for data in loader:
-        data = data.to(device)
-        pred, sc = model(data)
+    for graph_data in loader:
+        graph_data = graph_data.to(device)
+        pred, sc = model(graph_data)
         assert len(pred.shape) == 2
-        assert pred.shape == data.y.shape
+        assert pred.shape == graph_data.y.shape
 
         if 'loss' in metrics:
-            curr_result = loss_fn(pred, data.y).item()
+            curr_result = loss_fn(pred, graph_data.y).item()
             loss = curr_result if loss is None else loss + curr_result
         # For MAE and MSE.
         # Aggregating and taking the mean in the final step.
@@ -42,14 +42,14 @@ def compute_metrics(metrics: List[str] = ['MAE', 'MSE', 'loss'],
         if 'MAE' in metrics:
             curr_result = np.array([
                 F.l1_loss(
-                    pred[:, i], data.y[:, i], reduction='mean'
+                    pred[:, i], graph_data.y[:, i], reduction='mean'
                 ).cpu().detach().numpy() for i in range(pred.shape[1])])
             mean_abs_err = curr_result if mean_abs_err is None \
                 else np.vstack((mean_abs_err, curr_result))
         if 'MSE' in metrics:
             curr_result = np.array([
                 F.mse_loss(
-                    pred[:, i], data.y[:, i], reduction='mean'
+                    pred[:, i], graph_data.y[:, i], reduction='mean'
                 ).cpu().detach().numpy() for i in range(pred.shape[1])])
             mean_sqr_err = curr_result if mean_sqr_err is None \
                 else np.vstack((mean_sqr_err, curr_result))

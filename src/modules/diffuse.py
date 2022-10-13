@@ -11,7 +11,9 @@ from .lazy import LazinessLayer
 
 class Diffuse(MessagePassing):
     """
+    "The Diffusion Submodule" in https://arxiv.org/pdf/2208.07458.pdf.
     Low pass walk with optional weights.
+
     Init @params
         `in_channels`:        number of input channels
         `out_channels`:       number of output channels
