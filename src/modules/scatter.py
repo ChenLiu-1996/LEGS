@@ -54,8 +54,8 @@ class Scatter(torch.nn.Module):
             trainable_laziness=trainable_laziness)
 
         self.diffusion_layer2 = Diffuse(
-            in_channels=4*in_channels,
-            out_channels=4*in_channels,
+            in_channels=4 * in_channels,
+            out_channels=4 * in_channels,
             trainable_laziness=trainable_laziness
         )
 
@@ -124,7 +124,7 @@ class Scatter(torch.nn.Module):
         S0, S1 = S0.permute(0, 2, 1), S1.permute(0, 2, 1)
         x = torch.cat([S0, S1, S2], dim=1)
 
-        if hasattr(graph_data, 'batch'):
+        if hasattr(graph_data, 'batch') and graph_data.batch is not None:
             x = self.aggregation_submodule(
                 graph=x, batch_indices=graph_data.batch, moments_returned=4)
         else:
@@ -142,6 +142,6 @@ def feng_filters():
     results = [4]
     for i in range(2, 4):
         for j in range(0, i):
-            results.append(4*i+j)
+            results.append(4 * i + j)
 
     return results

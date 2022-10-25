@@ -14,13 +14,12 @@ from utils import AttributeHashmap, EarlyStopping, compute_metrics, log
 
 
 def parse_config(config: AttributeHashmap) -> AttributeHashmap:
-    config.log_dir = config.log_folder + \
-        os.path.basename(config.config_file_name).rstrip('.yaml') + '_log.txt'
-
     # Resolve type issues.
     config.learning_rate = float(config.learning_rate)
 
     # Initialize log file.
+    config.log_dir = config.log_folder + \
+        os.path.basename(config.config_file_name).rstrip('.yaml') + '_log.txt'
     log_str = 'Config: \n\n'
     for key in config.keys():
         log_str += '%s: %s\n' % (key, config[key])
