@@ -17,9 +17,18 @@ class LazinessLayer(torch.nn.Module):
         super().__init__()
         self.laziness_logit = torch.nn.Parameter(torch.zeros(in_channels))
 
-    def forward(self, x: torch.Tensor, propagated: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor,
+                propagated: torch.Tensor) -> torch.Tensor:
         laziness = torch.nn.functional.sigmoid(self.laziness_logit)
-        laziness = torch.unsqueeze(laziness, dim=1)
+        laziness = laziness.unsqueeze(dim=1)
+
+        assert x.shape == propagated.shape
+        assert len(x.shape) in [2, 3]
+        if len(x.shape) == 3:
+            batch_size = x.shape[0]
+            laziness = laziness.unsqueeze(dim=0)
+            laziness = laziness.repeat(batch_size, 1, 1)
+
         return laziness * x + (1 - laziness) * propagated
 
     def reset_parameters(self) -> None:
